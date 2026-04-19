@@ -193,8 +193,7 @@
         }
 
         async function loadPhotos(popupEl, objectId) {
-            if (!popupEl || popupEl.dataset.photosLoaded) return;
-            popupEl.dataset.photosLoaded = '1';
+            if (!popupEl) return;
 
             const container = popupEl.querySelector('.photos');
             const btn = popupEl.querySelector('.photo-btn');
