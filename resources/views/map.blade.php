@@ -28,14 +28,16 @@
         .fountain-popup b { display: block; margin-bottom: 2px; }
         .fountain-popup small { color: #666; }
         .fountain-popup .photos img { cursor: pointer; display: block; width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 4px; }
-        .fountain-popup .upload-wrap { display: flex; justify-content: center; margin-top: 6px; }
-        .fountain-popup .upload-btn {
-            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            padding: 6px 12px; font-size: 13px;
-            background: #1976d2; color: #fff; border: none; border-radius: 20px; cursor: pointer;
+        .fountain-popup .actions { display: flex; justify-content: center; gap: 6px; margin-top: 6px; flex-wrap: nowrap; }
+        .fountain-popup .pill-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; font-size: 14px;
+            background: #eceff1; color: #555; border: none; border-radius: 50%; cursor: pointer;
+            text-decoration: none;
         }
-        .fountain-popup .upload-btn:disabled { opacity: 0.6; cursor: wait; }
-        .fountain-popup .upload-msg { font-size: 12px; color: #b00020; margin-top: 4px; }
+        .fountain-popup .pill-btn:hover { background: #cfd8dc; }
+        .fountain-popup .pill-btn:disabled { opacity: 0.6; cursor: wait; }
+        .fountain-popup .upload-msg { font-size: 12px; color: #b00020; margin-top: 4px; text-align: center; }
 
         .lightbox {
             position: fixed; inset: 0; background: rgba(0,0,0,0.92);
@@ -67,7 +69,7 @@
 <body>
     <div id="map"></div>
     <div class="panel">
-        <h1>Drinking fountains near you</h1>
+        <h1>Drinking fountains <a href="#" id="recenter">near you</a></h1>
         <div id="status" class="status">Locating you…</div>
     </div>
 
@@ -87,6 +89,12 @@
         const statusEl = document.getElementById('status');
         const searchRadiusMeters = 2000;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        let currentUserLatLng = null;
+
+        document.getElementById('recenter').addEventListener('click', e => {
+            e.preventDefault();
+            if (currentUserLatLng) map.setView(currentUserLatLng, 16);
+        });
 
         const map = L.map('map').setView([48.2082, 16.3738], 13);
 
@@ -168,39 +176,38 @@
             return json.data;
         }
 
-        function renderPhotoBlock(container, objectId, photos) {
+        function renderThumbnails(container, photos) {
             container.innerHTML = '';
-            if (photos.length) {
-                const thumb = document.createElement('img');
-                thumb.src = photos[0].url;
-                thumb.alt = '';
-                thumb.addEventListener('click', () => openLightbox(photos, 0));
-                container.appendChild(thumb);
-
-                if (photos.length > 1) {
-                    const badge = document.createElement('small');
-                    badge.textContent = `+${photos.length - 1} more`;
-                    badge.style.cssText = 'display:block;color:#888;margin-top:2px;';
-                    container.appendChild(badge);
-                }
+            if (!photos.length) return;
+            const thumb = document.createElement('img');
+            thumb.src = photos[0].url;
+            thumb.alt = '';
+            thumb.addEventListener('click', () => openLightbox(photos, 0));
+            container.appendChild(thumb);
+            if (photos.length > 1) {
+                const badge = document.createElement('small');
+                badge.textContent = `+${photos.length - 1} more`;
+                badge.style.cssText = 'display:block;color:#888;margin-top:2px;';
+                container.appendChild(badge);
             }
+        }
 
-            const btnWrap = document.createElement('div');
-            btnWrap.className = 'upload-wrap';
+        async function loadPhotos(popupEl, objectId) {
+            if (!popupEl || popupEl.dataset.photosLoaded) return;
+            popupEl.dataset.photosLoaded = '1';
 
-            const btn = document.createElement('button');
-            btn.className = 'upload-btn';
-            btn.type = 'button';
-            btn.innerHTML = '<span>📷</span><span>Photo</span>';
-            btnWrap.appendChild(btn);
+            const container = popupEl.querySelector('.photos');
+            const btn = popupEl.querySelector('.photo-btn');
+            const input = popupEl.querySelector('.photo-input');
+            const msg = popupEl.querySelector('.upload-msg');
 
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/jpeg,image/png,image/webp';
-            input.style.display = 'none';
-
-            const msg = document.createElement('div');
-            msg.className = 'upload-msg';
+            container.innerHTML = '<small style="color:#888;">Loading photos…</small>';
+            try {
+                const photos = await fetchPhotos(objectId);
+                renderThumbnails(container, photos);
+            } catch (e) {
+                container.innerHTML = '<small style="color:#888;">Could not load photos.</small>';
+            }
 
             btn.addEventListener('click', () => input.click());
             input.addEventListener('change', async () => {
@@ -211,30 +218,14 @@
                 try {
                     await uploadPhoto(objectId, file);
                     const latest = await fetchPhotos(objectId);
-                    renderPhotoBlock(container, objectId, latest);
+                    renderThumbnails(container, latest);
                 } catch (e) {
                     msg.textContent = e.message;
+                } finally {
                     btn.disabled = false;
+                    input.value = '';
                 }
             });
-
-            container.appendChild(btnWrap);
-            container.appendChild(input);
-            container.appendChild(msg);
-        }
-
-        async function loadPhotos(popupEl, objectId) {
-            if (!popupEl) return;
-            const container = popupEl.querySelector('.photos');
-            if (!container || container.dataset.loaded) return;
-            container.dataset.loaded = '1';
-            container.innerHTML = '<small style="color:#888;">Loading photos…</small>';
-            try {
-                const photos = await fetchPhotos(objectId);
-                renderPhotoBlock(container, objectId, photos);
-            } catch (e) {
-                container.innerHTML = '<small style="color:#888;">Could not load photos.</small>';
-            }
         }
 
         const lightbox = document.getElementById('lightbox');
@@ -297,19 +288,21 @@
             withDistance.forEach(({ el, latlng, distance }, idx) => {
                 const name = el.tags?.BASIS_TYP_TXT || 'Drinking fountain';
                 const objectId = el.tags?.OBJECTID;
-                const googleUrl = `https://www.google.com/maps/search/Trinkbrunnen/@${el.lat},${el.lon},21z`;
+                const googleUrl = `https://www.google.com/maps/place/${el.lat},${el.lon}/@${el.lat},${el.lon},19z`;
                 const marker = L.marker(latlng, { icon: fountainIcon }).addTo(map);
                 marker.bindPopup(`
                     <div class="fountain-popup">
                         <b>${name}</b>
-                        <div style="display:flex;align-items:center;gap:6px;">
-                            <small>${Math.round(distance)} m away</small>
-                            <a href="${googleUrl}" target="_blank" rel="noopener" title="Photos on Google Maps">
-                                <img src="https://www.gstatic.com/images/branding/product/2x/maps_48dp.png"
-                                     alt="Google Maps" style="width:18px;height:18px;vertical-align:middle;">
-                            </a>
-                        </div>
+                        <small>${Math.round(distance)} m away</small>
                         <div class="photos" style="margin-top:6px;"></div>
+                        <div class="actions">
+                            <a class="pill-btn" href="${googleUrl}" target="_blank" rel="noopener" title="Google Maps" aria-label="Google Maps">
+                                <img src="https://www.gstatic.com/images/branding/product/2x/maps_48dp.png" alt="" style="width:18px;height:18px;">
+                            </a>
+                            <button class="pill-btn photo-btn" type="button" title="Add photo" aria-label="Add photo">📷</button>
+                        </div>
+                        <input class="photo-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none;">
+                        <div class="upload-msg"></div>
                     </div>
                 `);
                 if (objectId) {
@@ -346,6 +339,7 @@
 
         function onLocated(lat, lng) {
             const userLatLng = L.latLng(lat, lng);
+            currentUserLatLng = userLatLng;
             map.setView(userLatLng, 16);
             L.marker(userLatLng, { icon: userIcon, title: 'You are here' }).addTo(map);
             L.circle(userLatLng, { radius: searchRadiusMeters, color: '#e53935', weight: 1, fillOpacity: 0.05 }).addTo(map);
