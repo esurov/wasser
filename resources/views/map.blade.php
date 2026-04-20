@@ -152,17 +152,29 @@
         const fetchFountains = () => fetchVienna('TRINKBRUNNENOGD');
         const fetchToilets = () => fetchVienna('WCANLAGEOGD');
 
-        async function fetchPhotos(objectId) {
-            const res = await fetch(`/fountains/${objectId}/photos`, { headers: { Accept: 'application/json' } });
+        async function sha1Hex(str) {
+            const buf = new TextEncoder().encode(str);
+            const hash = await crypto.subtle.digest('SHA-1', buf);
+            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function shapeKey(el) {
+            const shape = el.tags?.SHAPE;
+            if (shape) return String(shape);
+            return `${el.lat.toFixed(7)},${el.lon.toFixed(7)}`;
+        }
+
+        async function fetchPhotos(shapeHash) {
+            const res = await fetch(`/fountains/${shapeHash}/photos`, { headers: { Accept: 'application/json' } });
             if (!res.ok) throw new Error('Fetch photos failed: ' + res.status);
             const json = await res.json();
             return json.data || [];
         }
 
-        async function uploadPhoto(objectId, file) {
+        async function uploadPhoto(shapeHash, file) {
             const form = new FormData();
             form.append('photo', file);
-            const res = await fetch(`/fountains/${objectId}/photos`, {
+            const res = await fetch(`/fountains/${shapeHash}/photos`, {
                 method: 'POST',
                 headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken },
                 body: form,
@@ -192,7 +204,7 @@
             }
         }
 
-        async function loadPhotos(popupEl, objectId) {
+        async function loadPhotos(popupEl, shapeHash) {
             if (!popupEl) return;
 
             const container = popupEl.querySelector('.photos');
@@ -202,7 +214,7 @@
 
             container.innerHTML = '<small style="color:#888;">Loading photos…</small>';
             try {
-                const photos = await fetchPhotos(objectId);
+                const photos = await fetchPhotos(shapeHash);
                 renderThumbnails(container, photos);
             } catch (e) {
                 container.innerHTML = '<small style="color:#888;">Could not load photos.</small>';
@@ -215,8 +227,8 @@
                 btn.disabled = true;
                 msg.textContent = '';
                 try {
-                    await uploadPhoto(objectId, file);
-                    const latest = await fetchPhotos(objectId);
+                    await uploadPhoto(shapeHash, file);
+                    const latest = await fetchPhotos(shapeHash);
                     renderThumbnails(container, latest);
                 } catch (e) {
                     msg.textContent = e.message;
@@ -277,16 +289,20 @@
             touchStartX = null;
         });
 
-        function renderFountains(elements, userLatLng) {
+        async function renderFountains(elements, userLatLng) {
             const withDistance = elements
                 .map(e => ({ el: e, latlng: L.latLng(e.lat, e.lon) }))
                 .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }))
                 .filter(o => o.distance <= searchRadiusMeters)
                 .sort((a, b) => a.distance - b.distance);
 
-            withDistance.forEach(({ el, latlng, distance }, idx) => {
+            const decorated = await Promise.all(withDistance.map(async o => ({
+                ...o,
+                shapeHash: await sha1Hex(shapeKey(o.el)),
+            })));
+
+            decorated.forEach(({ el, latlng, distance, shapeHash }, idx) => {
                 const name = el.tags?.BASIS_TYP_TXT || 'Drinking fountain';
-                const objectId = el.tags?.OBJECTID;
                 const googleUrl = `https://www.google.com/maps/place/${el.lat},${el.lon}/@${el.lat},${el.lon},19z`;
                 const marker = L.marker(latlng, { icon: fountainIcon }).addTo(map);
                 marker.bindPopup(`
@@ -304,14 +320,12 @@
                         <div class="upload-msg"></div>
                     </div>
                 `);
-                if (objectId) {
-                    marker.on('popupopen', e => loadPhotos(e.popup.getElement(), objectId));
-                }
+                marker.on('popupopen', e => loadPhotos(e.popup.getElement(), shapeHash));
                 if (idx === 0) marker.openPopup();
             });
 
-            statusEl.textContent = withDistance.length
-                ? `Found ${withDistance.length} fountain${withDistance.length === 1 ? '' : 's'} within ${searchRadiusMeters / 1000} km.`
+            statusEl.textContent = decorated.length
+                ? `Found ${decorated.length} fountain${decorated.length === 1 ? '' : 's'} within ${searchRadiusMeters / 1000} km.`
                 : `No fountains found within ${searchRadiusMeters / 1000} km.`;
         }
 

@@ -8,26 +8,26 @@ use Illuminate\Http\Request;
 
 class FountainPhotoController extends Controller
 {
-    public function index(int $objectId): JsonResponse
+    public function index(string $shapeHash): JsonResponse
     {
         $photos = FountainPhoto::query()
-            ->where('object_id', $objectId)
+            ->where('shape_hash', $shapeHash)
             ->orderByDesc('id')
-            ->get(['id', 'object_id', 'path']);
+            ->get(['id', 'shape_hash', 'path']);
 
         return response()->json(['data' => $photos]);
     }
 
-    public function store(Request $request, int $objectId): JsonResponse
+    public function store(Request $request, string $shapeHash): JsonResponse
     {
         $data = $request->validate([
             'photo' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:5120'],
         ]);
 
-        $path = $data['photo']->store("fountain_photos/{$objectId}", 'public');
+        $path = $data['photo']->store("fountain_photos/{$shapeHash}", 'public');
 
         $photo = FountainPhoto::create([
-            'object_id' => $objectId,
+            'shape_hash' => $shapeHash,
             'path' => $path,
         ]);
 

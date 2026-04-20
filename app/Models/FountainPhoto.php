@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Storage;
 
 class FountainPhoto extends Model
 {
-    protected $fillable = ['object_id', 'path'];
+    protected $fillable = ['shape_hash', 'path'];
 
     protected function url(): Attribute
     {
