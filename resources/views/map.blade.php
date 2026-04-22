@@ -88,12 +88,16 @@
     <script>
         const statusEl = document.getElementById('status');
         const searchRadiusMeters = 2000;
+        const locationRefreshMs = 10000;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
         let currentUserLatLng = null;
+        let userMarker = null;
+        let userRadiusCircle = null;
+        let nearbyLoaded = false;
 
         document.getElementById('recenter').addEventListener('click', e => {
             e.preventDefault();
-            if (currentUserLatLng) map.setView(currentUserLatLng, 16);
+            requestLocation({ recenter: true });
         });
 
         const map = L.map('map').setView([48.2082, 16.3738], 13);
@@ -388,13 +392,18 @@
                 });
         }
 
-        function onLocated(lat, lng) {
-            const userLatLng = L.latLng(lat, lng);
-            currentUserLatLng = userLatLng;
-            map.setView(userLatLng, 16);
-            L.marker(userLatLng, { icon: userIcon, title: 'You are here' }).addTo(map);
-            L.circle(userLatLng, { radius: searchRadiusMeters, color: '#e53935', weight: 1, fillOpacity: 0.05 }).addTo(map);
+        function placeUser(latLng) {
+            currentUserLatLng = latLng;
+            if (!userMarker) {
+                userMarker = L.marker(latLng, { icon: userIcon, title: 'You are here' }).addTo(map);
+                userRadiusCircle = L.circle(latLng, { radius: searchRadiusMeters, color: '#e53935', weight: 1, fillOpacity: 0.05 }).addTo(map);
+            } else {
+                userMarker.setLatLng(latLng);
+                userRadiusCircle.setLatLng(latLng);
+            }
+        }
 
+        function loadNearby(userLatLng) {
             statusEl.textContent = 'Loading nearby fountains & toilets…';
             Promise.allSettled([fetchFountains(), fetchToilets()])
                 .then(([fountainsRes, toiletsRes]) => {
@@ -411,19 +420,38 @@
                 });
         }
 
+        function requestLocation({ recenter = false } = {}) {
+            if (!navigator.geolocation) return;
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    const latLng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+                    placeUser(latLng);
+                    if (recenter || !nearbyLoaded) map.setView(latLng, 16);
+                    if (!nearbyLoaded) {
+                        nearbyLoaded = true;
+                        loadNearby(latLng);
+                    }
+                },
+                err => {
+                    if (nearbyLoaded) return;
+                    statusEl.textContent = 'Location unavailable (' + err.message + '). Showing Vienna.';
+                    statusEl.className = 'error';
+                    const fallback = L.latLng(48.2082, 16.3738);
+                    placeUser(fallback);
+                    map.setView(fallback, 16);
+                    nearbyLoaded = true;
+                    loadNearby(fallback);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
         if (!navigator.geolocation) {
             statusEl.textContent = 'Geolocation is not supported by your browser.';
             statusEl.className = 'error';
         } else {
-            navigator.geolocation.getCurrentPosition(
-                pos => onLocated(pos.coords.latitude, pos.coords.longitude),
-                err => {
-                    statusEl.textContent = 'Location unavailable (' + err.message + '). Showing Vienna.';
-                    statusEl.className = 'error';
-                    onLocated(48.2082, 16.3738);
-                },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-            );
+            requestLocation();
+            setInterval(requestLocation, locationRefreshMs);
         }
     </script>
 </body>
