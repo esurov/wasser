@@ -171,6 +171,39 @@
             return json.data || [];
         }
 
+        async function resizeImage(file, maxEdge = 1600, quality = 0.85) {
+            if (!file.type.startsWith('image/')) return file;
+
+            let bitmap;
+            try {
+                bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+            } catch {
+                return file;
+            }
+
+            const { width, height } = bitmap;
+            const scale = Math.min(1, maxEdge / Math.max(width, height));
+
+            if (scale === 1 && file.size <= 2 * 1024 * 1024) {
+                bitmap.close();
+                return file;
+            }
+
+            const w = Math.round(width * scale);
+            const h = Math.round(height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+            bitmap.close();
+
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+            if (!blob) return file;
+
+            const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+            return new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() });
+        }
+
         async function uploadPhoto(shapeHash, file) {
             const form = new FormData();
             form.append('photo', file);
@@ -225,12 +258,17 @@
                 const file = input.files?.[0];
                 if (!file) return;
                 btn.disabled = true;
-                msg.textContent = '';
+                msg.textContent = 'Processing…';
+                msg.style.color = '#888';
                 try {
-                    await uploadPhoto(shapeHash, file);
+                    const resized = await resizeImage(file);
+                    msg.textContent = 'Uploading…';
+                    await uploadPhoto(shapeHash, resized);
+                    msg.textContent = '';
                     const latest = await fetchPhotos(shapeHash);
                     renderThumbnails(container, latest);
                 } catch (e) {
+                    msg.style.color = '';
                     msg.textContent = e.message;
                 } finally {
                     btn.disabled = false;
