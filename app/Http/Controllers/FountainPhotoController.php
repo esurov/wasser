@@ -21,7 +21,7 @@ class FountainPhotoController extends Controller
     public function store(Request $request, string $shapeHash): JsonResponse
     {
         $data = $request->validate([
-            'photo' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:5120'],
+            'photo' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:15360'],
         ]);
 
         $path = $data['photo']->store("fountain_photos/{$shapeHash}", 'public');

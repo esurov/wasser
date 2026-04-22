@@ -62,7 +62,7 @@ Photos are stored on the `public` disk under `storage/app/public/fountain_photos
 | GET    | `/fountains/{objectId}/photos`            | Returns `{ data: Photo[] }`   |
 | POST   | `/fountains/{objectId}/photos`            | Throttled 10/min per IP       |
 
-Validation: `image`, `mimes:jpeg,png,webp`, `max:5120` KB.
+Validation: `image`, `mimes:jpeg,png,webp`, `max:15360` KB.
 
 ## Deployment
 
