@@ -46,11 +46,10 @@ class StatsController extends Controller
             $counts = [];
 
             foreach ($fountains as $fountain) {
-                $category = $fountain['BASIS_TYP_TXT'] ?? 'Unknown';
+                $category = $fountain['properties']['BASIS_TYP_TXT'] ?? 'Unknown';
                 $counts[$category] = ($counts[$category] ?? 0) + 1;
 
-                $shapeHash = sha1((string) ($fountain['SHAPE'] ?? ''));
-                if (isset($hashesWithPhotos[$shapeHash])) {
+                if (isset($hashesWithPhotos[$this->shapeHash($fountain)])) {
                     $fountainsWithPhotos++;
                 }
             }
@@ -91,9 +90,25 @@ class StatsController extends Controller
             'outputFormat' => 'json',
         ])->throw();
 
-        return array_map(
-            fn (array $feature) => $feature['properties'] ?? [],
-            $response->json('features') ?? [],
-        );
+        return $response->json('features') ?? [];
+    }
+
+    /**
+     * Must match the client-side `shapeKey` hash in map.blade.php:
+     * SHA-1 of the `SHAPE` property when present, otherwise of
+     * `"${lat.toFixed(7)},${lon.toFixed(7)}"` from the geometry.
+     *
+     * @param  array<string, mixed>  $feature
+     */
+    private function shapeHash(array $feature): string
+    {
+        $shape = $feature['properties']['SHAPE'] ?? null;
+        if ($shape !== null && $shape !== '') {
+            return sha1((string) $shape);
+        }
+
+        [$lon, $lat] = $feature['geometry']['coordinates'] ?? [0, 0];
+
+        return sha1(number_format((float) $lat, 7, '.', '').','.number_format((float) $lon, 7, '.', ''));
     }
 }
