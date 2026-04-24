@@ -36,6 +36,7 @@ migrate() {
 optimize() {
     cd "$APP_DIR"
     php artisan optimize:clear
+    php artisan cache:forget stats.overview || true
     php artisan config:cache
     php artisan route:cache
     php artisan view:cache
