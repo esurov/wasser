@@ -12,3 +12,8 @@ Schedule::command('photos:backup')
     ->dailyAt('03:00')
     ->onOneServer()
     ->runInBackground();
+
+Schedule::command('vienna:refresh')
+    ->dailyAt('02:30')
+    ->onOneServer()
+    ->runInBackground();

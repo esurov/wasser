@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\FountainPhoto;
+use App\Services\ViennaOpenData;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 
 class StatsController extends Controller
 {
@@ -31,11 +31,13 @@ class StatsController extends Controller
         'Hundetrinkbrunnen' => 'Dog drinking fountain',
     ];
 
+    public function __construct(private ViennaOpenData $vienna) {}
+
     public function __invoke(): View
     {
         $stats = Cache::remember('stats.overview', now()->addHour(), function () {
-            $fountains = $this->fetchVienna('TRINKBRUNNENOGD');
-            $toilets = $this->fetchVienna('WCANLAGEOGD');
+            $fountains = $this->vienna->features(ViennaOpenData::FOUNTAINS);
+            $toilets = $this->vienna->features(ViennaOpenData::TOILETS);
 
             $hashesWithPhotos = FountainPhoto::query()
                 ->distinct()
@@ -77,28 +79,11 @@ class StatsController extends Controller
     }
 
     /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function fetchVienna(string $typeName): array
-    {
-        $response = Http::timeout(20)->get('https://data.wien.gv.at/daten/geo', [
-            'service' => 'WFS',
-            'version' => '1.1.0',
-            'request' => 'GetFeature',
-            'typeName' => "ogdwien:{$typeName}",
-            'srsName' => 'EPSG:4326',
-            'outputFormat' => 'json',
-        ])->throw();
-
-        return $response->json('features') ?? [];
-    }
-
-    /**
      * Must match the client-side `shapeKey` hash in map.blade.php:
      * SHA-1 of the `SHAPE` property when present, otherwise of
-     * `"${lat.toFixed(7)},${lon.toFixed(7)}"` from the geometry.
+     * `"${lat.toFixed(7)},${lon.toFixed(7)}"`.
      *
-     * @param  array<string, mixed>  $feature
+     * @param  array{lat: float, lon: float, properties: array<string, mixed>}  $feature
      */
     private function shapeHash(array $feature): string
     {
@@ -107,8 +92,6 @@ class StatsController extends Controller
             return sha1((string) $shape);
         }
 
-        [$lon, $lat] = $feature['geometry']['coordinates'] ?? [0, 0];
-
-        return sha1(number_format((float) $lat, 7, '.', '').','.number_format((float) $lon, 7, '.', ''));
+        return sha1(number_format($feature['lat'], 7, '.', '').','.number_format($feature['lon'], 7, '.', ''));
     }
 }

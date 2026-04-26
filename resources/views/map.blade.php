@@ -139,22 +139,15 @@
             return 2 * R * Math.asin(Math.sqrt(x));
         }
 
-        async function fetchVienna(typeName) {
-            const url = 'https://data.wien.gv.at/daten/geo?service=WFS&version=1.1.0'
-                + `&request=GetFeature&typeName=ogdwien:${typeName}`
-                + '&srsName=EPSG:4326&outputFormat=json';
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`Vienna Open Data request failed: ${res.status}`);
+        async function fetchLayer(path) {
+            const res = await fetch(path, { headers: { Accept: 'application/json' } });
+            if (!res.ok) throw new Error(`Layer request failed: ${res.status}`);
             const data = await res.json();
-            return (data.features || []).map(f => ({
-                lat: f.geometry.coordinates[1],
-                lon: f.geometry.coordinates[0],
-                tags: f.properties || {},
-            }));
+            return data.features || [];
         }
 
-        const fetchFountains = () => fetchVienna('TRINKBRUNNENOGD');
-        const fetchToilets = () => fetchVienna('WCANLAGEOGD');
+        const fetchFountains = () => fetchLayer('/api/fountains');
+        const fetchToilets = () => fetchLayer('/api/toilets');
 
         async function sha1Hex(str) {
             const buf = new TextEncoder().encode(str);
@@ -163,7 +156,7 @@
         }
 
         function shapeKey(el) {
-            const shape = el.tags?.SHAPE;
+            const shape = el.properties?.SHAPE;
             if (shape) return String(shape);
             return `${el.lat.toFixed(7)},${el.lon.toFixed(7)}`;
         }
@@ -344,7 +337,7 @@
             })));
 
             decorated.forEach(({ el, latlng, distance, shapeHash }, idx) => {
-                const name = el.tags?.BASIS_TYP_TXT || 'Drinking fountain';
+                const name = el.properties?.BASIS_TYP_TXT || 'Drinking fountain';
                 const googleUrl = `https://www.google.com/maps/place/${el.lat},${el.lon}/@${el.lat},${el.lon},19z`;
                 const marker = L.marker(latlng, { icon: fountainIcon }).addTo(map);
                 marker.bindPopup(`
@@ -377,7 +370,7 @@
                 .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }))
                 .filter(o => o.distance <= searchRadiusMeters)
                 .forEach(({ el, latlng, distance }) => {
-                    const t = el.tags || {};
+                    const t = el.properties || {};
                     const title = t.KATEGORIE || 'Public toilet';
                     const street = t.STRASSE ? `<div><small>${t.STRASSE}</small></div>` : '';
                     const hours = t.OEFFNUNGSZEIT ? `<div><small>🕑 ${t.OEFFNUNGSZEIT}</small></div>` : '';
