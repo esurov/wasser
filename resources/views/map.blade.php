@@ -90,11 +90,15 @@
         const statusEl = document.getElementById('status');
         const searchRadiusMeters = 2000;
         const locationRefreshMs = 10000;
+        const minRerenderMeters = 25;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
         let currentUserLatLng = null;
         let userMarker = null;
         let userRadiusCircle = null;
         let nearbyLoaded = false;
+        let fountainsData = null;
+        let toiletsData = null;
+        let lastRenderLatLng = null;
 
         document.getElementById('recenter').addEventListener('click', e => {
             e.preventDefault();
@@ -102,6 +106,7 @@
         });
 
         const map = L.map('map').setView([48.2082, 16.3738], 13);
+        const markersGroup = L.layerGroup().addTo(map);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
@@ -326,7 +331,7 @@
             touchStartX = null;
         });
 
-        async function renderFountains(elements, userLatLng) {
+        async function renderFountains(elements, userLatLng, { autoOpenFirst = false } = {}) {
             const withDistance = elements
                 .map(e => ({ el: e, latlng: L.latLng(e.lat, e.lon) }))
                 .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }))
@@ -341,7 +346,7 @@
             decorated.forEach(({ el, latlng, distance, shapeHash }, idx) => {
                 const name = el.properties?.BASIS_TYP_TXT || 'Drinking fountain';
                 const googleUrl = `https://www.google.com/maps/place/${el.lat},${el.lon}/@${el.lat},${el.lon},19z`;
-                const marker = L.marker(latlng, { icon: fountainIcon }).addTo(map);
+                const marker = L.marker(latlng, { icon: fountainIcon }).addTo(markersGroup);
                 marker.bindPopup(`
                     <div class="fountain-popup">
                         <b>${name}</b>
@@ -358,7 +363,7 @@
                     </div>
                 `);
                 marker.on('popupopen', e => loadPhotos(e.popup.getElement(), shapeHash));
-                if (idx === 0) marker.openPopup();
+                if (autoOpenFirst && idx === 0) marker.openPopup();
             });
 
             statusEl.textContent = decorated.length
@@ -376,7 +381,7 @@
                     const title = t.KATEGORIE || 'Public toilet';
                     const street = t.STRASSE ? `<div><small>${t.STRASSE}</small></div>` : '';
                     const hours = t.OEFFNUNGSZEIT ? `<div><small>🕑 ${t.OEFFNUNGSZEIT}</small></div>` : '';
-                    L.marker(latlng, { icon: toiletIcon }).addTo(map).bindPopup(`
+                    L.marker(latlng, { icon: toiletIcon }).addTo(markersGroup).bindPopup(`
                         <div class="fountain-popup">
                             <b>${title}</b>
                             ${street}
@@ -398,20 +403,25 @@
             }
         }
 
+        function renderNearby(userLatLng, { autoOpenFirst = false } = {}) {
+            markersGroup.clearLayers();
+            if (fountainsData) renderFountains(fountainsData, userLatLng, { autoOpenFirst });
+            if (toiletsData) renderToilets(toiletsData, userLatLng);
+            lastRenderLatLng = userLatLng;
+        }
+
         function loadNearby(userLatLng) {
             statusEl.textContent = 'Loading nearby fountains & toilets…';
             Promise.allSettled([fetchFountains(), fetchToilets()])
                 .then(([fountainsRes, toiletsRes]) => {
-                    if (fountainsRes.status === 'fulfilled') {
-                        renderFountains(fountainsRes.value, userLatLng);
-                    }
-                    if (toiletsRes.status === 'fulfilled') {
-                        renderToilets(toiletsRes.value, userLatLng);
-                    }
-                    if (fountainsRes.status === 'rejected' && toiletsRes.status === 'rejected') {
+                    if (fountainsRes.status === 'fulfilled') fountainsData = fountainsRes.value;
+                    if (toiletsRes.status === 'fulfilled') toiletsData = toiletsRes.value;
+                    if (!fountainsData && !toiletsData) {
                         statusEl.textContent = 'Could not load map data.';
                         statusEl.className = 'error';
+                        return;
                     }
+                    renderNearby(userLatLng, { autoOpenFirst: true });
                 });
         }
 
@@ -425,6 +435,8 @@
                     if (!nearbyLoaded) {
                         nearbyLoaded = true;
                         loadNearby(latLng);
+                    } else if (!lastRenderLatLng || haversine(lastRenderLatLng, latLng) >= minRerenderMeters) {
+                        renderNearby(latLng);
                     }
                 },
                 err => {
