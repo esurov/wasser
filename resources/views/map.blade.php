@@ -25,6 +25,7 @@
         .panel h1 { margin: 0 0 4px 0; font-size: 16px; }
         .panel .status { color: #555; }
         .panel .error { color: #b00020; }
+        .fountain-marker svg { width: 100%; height: 100%; display: block; }
         .fountain-popup b { display: block; margin-bottom: 2px; }
         .fountain-popup small { color: #666; }
         .fountain-popup .photos img { cursor: pointer; display: block; width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 4px; }
@@ -107,11 +108,12 @@
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         }).addTo(map);
 
+        const fountainSvg = @json(file_get_contents(resource_path('images/trinkbrunnen.svg')));
         const fountainIcon = L.divIcon({
             className: 'fountain-marker',
-            html: '<div style="background:#1976d2;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:16px;">💧</div>',
-            iconSize: [28, 28],
-            iconAnchor: [14, 14],
+            html: `<div style="width:32px;height:32px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));">${fountainSvg}</div>`,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
         });
 
         const toiletIcon = L.divIcon({

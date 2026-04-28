@@ -4,7 +4,9 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 class ViennaOpenData
 {
@@ -22,7 +24,23 @@ class ViennaOpenData
      */
     public function features(string $layer): array
     {
-        return Cache::rememberForever($this->cacheKey($layer), fn () => $this->fetch($layer));
+        return Cache::rememberForever($this->cacheKey($layer), function () use ($layer) {
+            try {
+                return $this->fetch($layer);
+            } catch (Throwable $e) {
+                $fallback = $this->loadFallback($layer);
+                if ($fallback === null) {
+                    throw $e;
+                }
+
+                Log::warning("Vienna Open Data fetch failed for {$layer}; seeding cache from CSV fallback.", [
+                    'exception' => $e->getMessage(),
+                    'features' => count($fallback),
+                ]);
+
+                return $fallback;
+            }
+        });
     }
 
     /**
@@ -55,7 +73,7 @@ class ViennaOpenData
      */
     private function fetch(string $layer): array
     {
-        $response = Http::timeout(30)->get('https://data.wien.gv.at/daten/geo', [
+        $response = Http::timeout(2)->get('https://data.wien.gv.at/daten/geo', [
             'service' => 'WFS',
             'version' => '1.1.0',
             'request' => 'GetFeature',
@@ -84,5 +102,59 @@ class ViennaOpenData
                 'properties' => $feature['properties'] ?? [],
             ];
         }, $payload['features'])));
+    }
+
+    /**
+     * Seed-from-disk fallback used only when the live WFS request fails on a
+     * cache miss. Currently only the fountains layer ships with a bundled CSV.
+     *
+     * @return array<int, array{lat: float, lon: float, properties: array<string, mixed>}>|null
+     */
+    private function loadFallback(string $layer): ?array
+    {
+        if ($layer !== self::FOUNTAINS) {
+            return null;
+        }
+
+        $path = base_path('TRINKBRUNNENOGD.csv');
+        $handle = @fopen($path, 'r');
+        if ($handle === false) {
+            return null;
+        }
+
+        try {
+            $header = fgetcsv($handle, escape: '');
+            if (! is_array($header)) {
+                return null;
+            }
+
+            $features = [];
+            while (($row = fgetcsv($handle, escape: '')) !== false) {
+                if (count($row) !== count($header)) {
+                    continue;
+                }
+                $row = array_combine($header, $row);
+
+                $shape = (string) ($row['SHAPE'] ?? '');
+                if (! preg_match('/POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i', $shape, $m)) {
+                    continue;
+                }
+
+                $features[] = [
+                    'lon' => (float) $m[1],
+                    'lat' => (float) $m[2],
+                    'properties' => [
+                        'OBJECTID' => $row['OBJECTID'] ?? null,
+                        'SHAPE' => $shape,
+                        'BASIS_TYP_TXT' => $row['BASIS_TYP_TXT'] ?? null,
+                        'BASIS_TYP' => $row['BASIS_TYP'] ?? null,
+                    ],
+                ];
+            }
+
+            return $features;
+        } finally {
+            fclose($handle);
+        }
     }
 }
