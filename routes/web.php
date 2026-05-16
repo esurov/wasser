@@ -12,6 +12,8 @@ Route::get('/stats', StatsController::class)->name('stats');
 Route::get('/api/fountains', [ViennaOpenDataController::class, 'fountains'])->name('api.fountains');
 Route::get('/api/toilets', [ViennaOpenDataController::class, 'toilets'])->name('api.toilets');
 
+Route::get('/api/fountains/photo-hashes', [FountainPhotoController::class, 'hashes'])->name('api.fountains.photo-hashes');
+
 Route::get('/fountains/{shapeHash}/photos', [FountainPhotoController::class, 'index'])
     ->where('shapeHash', '[0-9a-f]{40}');
 

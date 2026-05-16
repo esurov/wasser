@@ -25,6 +25,20 @@
         .panel h1 { margin: 0 0 4px 0; font-size: 16px; }
         .panel .status { color: #555; }
         .panel .error { color: #b00020; }
+        .panel .toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer; user-select: none; }
+        .panel .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+        .panel .toggle .switch {
+            position: relative; flex: none; width: 34px; height: 20px;
+            background: #cfd8dc; border-radius: 999px; transition: background .15s ease;
+        }
+        .panel .toggle .switch::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 16px; height: 16px; border-radius: 50%; background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .15s ease;
+        }
+        .panel .toggle input:checked + .switch { background: #1976d2; }
+        .panel .toggle input:checked + .switch::after { transform: translateX(14px); }
+        .panel .toggle input:focus-visible + .switch { box-shadow: 0 0 0 2px rgba(25,118,210,.4); }
         .fountain-marker svg { width: 100%; height: 100%; display: block; }
         .fountain-popup b { display: block; margin-bottom: 2px; }
         .fountain-popup small { color: #666; }
@@ -72,6 +86,7 @@
     <div class="panel">
         <h1>Drinking fountains <a href="#" id="recenter">near you</a></h1>
         <div id="status" class="status">Locating you…</div>
+        <label class="toggle"><input type="checkbox" id="show-all-toggle"><span class="switch"></span> Show whole city</label>
     </div>
 
     <div id="lightbox" class="lightbox" role="dialog" aria-label="Photo viewer">
@@ -99,10 +114,31 @@
         let fountainsData = null;
         let toiletsData = null;
         let lastRenderLatLng = null;
+        let showAll = false;
+        let hashesWithPhotos = null;
+        let hashesWithPhotosPromise = null;
 
         document.getElementById('recenter').addEventListener('click', e => {
             e.preventDefault();
             requestLocation({ recenter: true });
+        });
+
+        document.getElementById('show-all-toggle').addEventListener('change', async e => {
+            showAll = e.target.checked;
+            if (userRadiusCircle) {
+                if (showAll) map.removeLayer(userRadiusCircle);
+                else userRadiusCircle.addTo(map);
+            }
+            if (showAll) {
+                statusEl.textContent = 'Loading all fountains…';
+                await loadHashesWithPhotos();
+            }
+            if (currentUserLatLng) renderNearby(currentUserLatLng);
+            if (showAll) {
+                map.setView(currentUserLatLng || [48.2082, 16.3738], 14);
+            } else if (currentUserLatLng) {
+                map.setView(currentUserLatLng, 16);
+            }
         });
 
         const map = L.map('map').setView([48.2082, 16.3738], 13);
@@ -114,12 +150,23 @@
         }).addTo(map);
 
         const fountainSvg = @json(file_get_contents(resource_path('images/trinkbrunnen.svg')));
-        const fountainIcon = L.divIcon({
-            className: 'fountain-marker',
-            html: `<div style="width:32px;height:32px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));">${fountainSvg}</div>`,
-            iconSize: [32, 32],
-            iconAnchor: [16, 16],
-        });
+        // Strip the .background CSS rule so per-variant fill set inline on the rect wins;
+        // otherwise the last-inserted <style> block would recolor every marker on the page.
+        const fountainSvgBase = fountainSvg.replace(/\.background\s*\{[^}]*\}/, '');
+        const makeFountainIcon = color => {
+            const svg = fountainSvgBase.replace(
+                /<rect\b([^>]*?)class="background"/,
+                `<rect$1fill="${color}" class="background"`
+            );
+            return L.divIcon({
+                className: 'fountain-marker',
+                html: `<div style="width:32px;height:32px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4));">${svg}</div>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+            });
+        };
+        const fountainIcon = makeFountainIcon('#004DA8');
+        const fountainIconGreen = makeFountainIcon('#2e7d32');
 
         const toiletIcon = L.divIcon({
             className: 'toilet-marker',
@@ -155,6 +202,16 @@
 
         const fetchFountains = () => fetchLayer('/api/fountains');
         const fetchToilets = () => fetchLayer('/api/toilets');
+
+        function loadHashesWithPhotos() {
+            if (hashesWithPhotos) return Promise.resolve(hashesWithPhotos);
+            if (hashesWithPhotosPromise) return hashesWithPhotosPromise;
+            hashesWithPhotosPromise = fetch('/api/fountains/photo-hashes', { headers: { Accept: 'application/json' } })
+                .then(res => res.ok ? res.json() : { data: [] })
+                .then(json => { hashesWithPhotos = new Set(json.data || []); return hashesWithPhotos; })
+                .catch(() => { hashesWithPhotos = new Set(); return hashesWithPhotos; });
+            return hashesWithPhotosPromise;
+        }
 
         async function sha1Hex(str) {
             const buf = new TextEncoder().encode(str);
@@ -332,13 +389,15 @@
         });
 
         async function renderFountains(elements, userLatLng, { autoOpenFirst = false } = {}) {
-            const withDistance = elements
+            const all = elements
                 .map(e => ({ el: e, latlng: L.latLng(e.lat, e.lon) }))
-                .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }))
-                .filter(o => o.distance <= searchRadiusMeters)
-                .sort((a, b) => a.distance - b.distance);
+                .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }));
 
-            const decorated = await Promise.all(withDistance.map(async o => ({
+            const visible = showAll
+                ? all
+                : all.filter(o => o.distance <= searchRadiusMeters).sort((a, b) => a.distance - b.distance);
+
+            const decorated = await Promise.all(visible.map(async o => ({
                 ...o,
                 shapeHash: await sha1Hex(shapeKey(o.el)),
             })));
@@ -346,7 +405,9 @@
             decorated.forEach(({ el, latlng, distance, shapeHash }, idx) => {
                 const name = el.properties?.BASIS_TYP_TXT || 'Drinking fountain';
                 const googleUrl = `https://www.google.com/maps/place/${el.lat},${el.lon}/@${el.lat},${el.lon},19z`;
-                const marker = L.marker(latlng, { icon: fountainIcon }).addTo(markersGroup);
+                const hasPhoto = showAll && hashesWithPhotos && hashesWithPhotos.has(shapeHash);
+                const icon = hasPhoto ? fountainIconGreen : fountainIcon;
+                const marker = L.marker(latlng, { icon }).addTo(markersGroup);
                 marker.bindPopup(`
                     <div class="fountain-popup">
                         <b>${name}</b>
@@ -363,20 +424,24 @@
                     </div>
                 `);
                 marker.on('popupopen', e => loadPhotos(e.popup.getElement(), shapeHash));
-                if (autoOpenFirst && idx === 0) marker.openPopup();
+                if (autoOpenFirst && !showAll && idx === 0) marker.openPopup();
             });
 
-            statusEl.textContent = decorated.length
-                ? `Found ${decorated.length} fountain${decorated.length === 1 ? '' : 's'} within ${searchRadiusMeters / 1000} km.`
-                : `No fountains found within ${searchRadiusMeters / 1000} km.`;
+            if (showAll) {
+                statusEl.textContent = `Showing all ${decorated.length} fountains in the city.`;
+            } else {
+                statusEl.textContent = decorated.length
+                    ? `Found ${decorated.length} fountain${decorated.length === 1 ? '' : 's'} within ${searchRadiusMeters / 1000} km.`
+                    : `No fountains found within ${searchRadiusMeters / 1000} km.`;
+            }
         }
 
         function renderToilets(elements, userLatLng) {
-            elements
+            const all = elements
                 .map(e => ({ el: e, latlng: L.latLng(e.lat, e.lon) }))
-                .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }))
-                .filter(o => o.distance <= searchRadiusMeters)
-                .forEach(({ el, latlng, distance }) => {
+                .map(o => ({ ...o, distance: haversine(userLatLng, o.latlng) }));
+            const visible = showAll ? all : all.filter(o => o.distance <= searchRadiusMeters);
+            visible.forEach(({ el, latlng, distance }) => {
                     const t = el.properties || {};
                     const title = t.KATEGORIE || 'Public toilet';
                     const street = t.STRASSE ? `<div><small>${t.STRASSE}</small></div>` : '';
@@ -396,7 +461,8 @@
             currentUserLatLng = latLng;
             if (!userMarker) {
                 userMarker = L.marker(latLng, { icon: userIcon, title: 'You are here' }).addTo(map);
-                userRadiusCircle = L.circle(latLng, { radius: searchRadiusMeters, color: '#e53935', weight: 1, fillOpacity: 0.05 }).addTo(map);
+                userRadiusCircle = L.circle(latLng, { radius: searchRadiusMeters, color: '#e53935', weight: 1, fillOpacity: 0.05 });
+                if (!showAll) userRadiusCircle.addTo(map);
             } else {
                 userMarker.setLatLng(latLng);
                 userRadiusCircle.setLatLng(latLng);

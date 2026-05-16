@@ -18,6 +18,15 @@ class FountainPhotoController extends Controller
         return response()->json(['data' => $photos]);
     }
 
+    public function hashes(): JsonResponse
+    {
+        $hashes = FountainPhoto::query()
+            ->distinct()
+            ->pluck('shape_hash');
+
+        return response()->json(['data' => $hashes]);
+    }
+
     public function store(Request $request, string $shapeHash): JsonResponse
     {
         $data = $request->validate([
