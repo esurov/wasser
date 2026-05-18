@@ -298,7 +298,7 @@
             }
         }
 
-        async function loadPhotos(popupEl, shapeHash) {
+        async function loadPhotos(popupEl, shapeHash, marker) {
             if (!popupEl) return;
 
             const container = popupEl.querySelector('.photos');
@@ -328,6 +328,8 @@
                     msg.textContent = '';
                     const latest = await fetchPhotos(shapeHash);
                     renderThumbnails(container, latest);
+                    if (hashesWithPhotos) hashesWithPhotos.add(shapeHash);
+                    if (marker && showAll) marker.setIcon(fountainIconGreen);
                 } catch (e) {
                     msg.style.color = '';
                     msg.textContent = e.message;
@@ -423,7 +425,7 @@
                         <div class="upload-msg"></div>
                     </div>
                 `);
-                marker.on('popupopen', e => loadPhotos(e.popup.getElement(), shapeHash));
+                marker.on('popupopen', e => loadPhotos(e.popup.getElement(), shapeHash, marker));
                 if (autoOpenFirst && !showAll && idx === 0) marker.openPopup();
             });
 
